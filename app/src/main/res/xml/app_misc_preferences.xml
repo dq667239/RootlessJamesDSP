@@ -28,6 +28,17 @@
             app:iconSpaceReserved="false" />
     </PreferenceCategory>
 
+    <PreferenceCategory app:title="@string/tonality_settings_header"
+        app:iconSpaceReserved="false">
+        <me.timschneeberger.rootlessjamesdsp.preference.MaterialSwitchPreference
+            android:key="@string/key_tonality_enabled"
+            android:defaultValue="@bool/default_tonality_enabled"
+            android:title="@string/tonality_enabled"
+            android:summaryOff="@string/tonality_enabled_off"
+            android:summaryOn="@string/tonality_enabled_on"
+            app:iconSpaceReserved="false" />
+    </PreferenceCategory>
+
     <PreferenceCategory app:title="@string/misc_permission_header"
         app:iconSpaceReserved="false">
         <me.timschneeberger.rootlessjamesdsp.preference.IconPreference

@@ -611,6 +611,18 @@
     <string name="enhanced_processing_feature_unavailable_content">This feature is only available when \'enhanced processing\' is enabled in the settings. Please go to \'Settings > Audio processing > Enhanced processing\' and enable that option to access this menu.\n\nNote: \'Enhanced processing\' can not be used while legacy mode is enabled.</string>
     <string name="enhanced_processing_missing_perm">Enhanced processing has been disabled due to a missing permission. Please re-setup it in settings.</string>
 
+    <!-- Song tonality analyzer -->
+    <string name="tonality_settings_header">Song tonality</string>
+    <string name="tonality_enabled">Enable song tonality analyzer</string>
+    <string name="tonality_enabled_off">Analyze captured playback before JamesDSP processing. Disabled by default.</string>
+    <string name="tonality_enabled_on">Analyzing captured playback before JamesDSP processing.</string>
+    <string name="tonality_title">Song Tonality</string>
+    <string name="tonality_waiting">Waiting for playback...</string>
+    <string name="tonality_disabled">Song tonality analyzer disabled</string>
+    <string name="tonality_warming_up">Warming up...</string>
+    <string name="tonality_tentative">Tentative reading. Live trace and track average shown.</string>
+    <string name="tonality_trace_legend">Live trace and track average vs approximate M-Noise</string>
+
     <!-- App list -->
     <string name="app_list_loading">Loading apps…</string>
     <string name="app_list_search">Search</string>

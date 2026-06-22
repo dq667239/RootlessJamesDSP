@@ -28,8 +28,13 @@ import androidx.lifecycle.Observer
 import androidx.lifecycle.asLiveData
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import me.timschneeberger.rootlessjamesdsp.BuildConfig
 import me.timschneeberger.rootlessjamesdsp.R
+import me.timschneeberger.rootlessjamesdsp.analysis.PreDspTonalityAnalyzer
+import me.timschneeberger.rootlessjamesdsp.analysis.TonalityFrame
 import me.timschneeberger.rootlessjamesdsp.flavor.CrashlyticsImpl
 import me.timschneeberger.rootlessjamesdsp.interop.JamesDspLocalEngine
 import me.timschneeberger.rootlessjamesdsp.interop.ProcessorMessageHandler
@@ -40,6 +45,7 @@ import me.timschneeberger.rootlessjamesdsp.model.room.AppBlocklistRepository
 import me.timschneeberger.rootlessjamesdsp.model.room.BlockedApp
 import me.timschneeberger.rootlessjamesdsp.model.rootless.SessionRecordingPolicyEntry
 import me.timschneeberger.rootlessjamesdsp.session.rootless.OnRootlessSessionChangeListener
+import me.timschneeberger.rootlessjamesdsp.session.rootless.MediaSessionTrackObserver
 import me.timschneeberger.rootlessjamesdsp.session.rootless.RootlessSessionDatabase
 import me.timschneeberger.rootlessjamesdsp.session.rootless.RootlessSessionManager
 import me.timschneeberger.rootlessjamesdsp.session.rootless.SessionRecordingPolicyManager
@@ -79,6 +85,13 @@ class RootlessAudioProcessorService : BaseAudioProcessorService() {
     private var recreateRecorderRequested = false
     private var recorderThread: Thread? = null
     private lateinit var engine: JamesDspLocalEngine
+    private var tonalityAnalyzer: PreDspTonalityAnalyzer? = null
+    private var mediaSessionTrackObserver: MediaSessionTrackObserver? = null
+
+    @Volatile
+    private var tonalityEnabled = false
+    private val _tonalityFrames = MutableStateFlow<TonalityFrame?>(null)
+    val tonalityFrames: StateFlow<TonalityFrame?> = _tonalityFrames.asStateFlow()
     private val isRunning: Boolean
         get() = recorderThread != null
 
@@ -144,6 +157,7 @@ class RootlessAudioProcessorService : BaseAudioProcessorService() {
         preferences.registerOnSharedPreferenceChangeListener(preferencesListener)
         loadFromPreferences(getString(R.string.key_powersave_suspend))
         loadFromPreferences(getString(R.string.key_session_exclude_restricted))
+        loadFromPreferences(getString(R.string.key_tonality_enabled))
 
         // Setup database observer
         blockedApps.observeForever(blockedAppObserver)
@@ -395,6 +409,22 @@ class RootlessAudioProcessorService : BaseAudioProcessorService() {
 
                 requestAudioRecordRecreation()
             }
+            getString(R.string.key_tonality_enabled) -> {
+                val previousValue = tonalityEnabled
+                tonalityEnabled = preferences.get<Boolean>(R.string.key_tonality_enabled)
+                Timber.d("Tonality analyzer enabled set to $tonalityEnabled")
+
+                if(!tonalityEnabled) {
+                    mediaSessionTrackObserver?.stop()
+                    mediaSessionTrackObserver = null
+                    tonalityAnalyzer?.stop()
+                    tonalityAnalyzer = null
+                }
+
+                if(previousValue != tonalityEnabled && isRunning && !isProcessorDisposing && !isServiceDisposing) {
+                    restartRecording()
+                }
+            }
         }
     }
 
@@ -454,6 +484,28 @@ class RootlessAudioProcessorService : BaseAudioProcessorService() {
         if(engine.sampleRate.toInt() != sampleRate) {
             Timber.d("Sampling rate changed to ${sampleRate}Hz")
             engine.sampleRate = sampleRate.toFloat()
+        }
+
+        val analyzer = if(tonalityEnabled) {
+            PreDspTonalityAnalyzer(onFrame = { frame ->
+                _tonalityFrames.value = frame
+            }).also {
+                it.start(sampleRate)
+                tonalityAnalyzer = it
+            }
+        }
+        else {
+            _tonalityFrames.value = null
+            tonalityAnalyzer = null
+            null
+        }
+        val trackObserver = analyzer?.let { activeAnalyzer ->
+            MediaSessionTrackObserver(this) { event ->
+                activeAnalyzer.resetTrack(event)
+            }.also {
+                it.startIfPermitted()
+                mediaSessionTrackObserver = it
+            }
         }
 
         // TODO Move all audio-related code to C++
@@ -517,14 +569,28 @@ class RootlessAudioProcessorService : BaseAudioProcessorService() {
 
                     // Choose encoding and process data
                     if(encoding == AudioEncoding.PcmShort) {
-                        recorder.read(shortBuffer, 0, shortBuffer.size, AudioRecord.READ_BLOCKING)
-                        engine.processInt16(shortBuffer, shortOutBuffer)
-                        track.write(shortOutBuffer, 0, shortOutBuffer.size, AudioTrack.WRITE_BLOCKING)
+                        val samplesRead = recorder.read(shortBuffer, 0, shortBuffer.size, AudioRecord.READ_BLOCKING)
+                        val usableSamples = usableStereoSamples(samplesRead)
+                        if(usableSamples > 0) {
+                            if(tonalityEnabled) analyzer?.offerPcm16(shortBuffer, usableSamples)
+                            engine.processInt16(shortBuffer, shortOutBuffer, offset = 0, length = usableSamples)
+                            track.write(shortOutBuffer, 0, usableSamples, AudioTrack.WRITE_BLOCKING)
+                        }
+                        else {
+                            handleAudioReadResult(samplesRead)
+                        }
                     }
                     else {
-                        recorder.read(floatBuffer, 0, floatBuffer.size, AudioRecord.READ_BLOCKING)
-                        engine.processFloat(floatBuffer, floatOutBuffer)
-                        track.write(floatOutBuffer, 0, floatOutBuffer.size, AudioTrack.WRITE_BLOCKING)
+                        val samplesRead = recorder.read(floatBuffer, 0, floatBuffer.size, AudioRecord.READ_BLOCKING)
+                        val usableSamples = usableStereoSamples(samplesRead)
+                        if(usableSamples > 0) {
+                            if(tonalityEnabled) analyzer?.offerFloat(floatBuffer, usableSamples)
+                            engine.processFloat(floatBuffer, floatOutBuffer, offset = 0, length = usableSamples)
+                            track.write(floatOutBuffer, 0, usableSamples, AudioTrack.WRITE_BLOCKING)
+                        }
+                        else {
+                            handleAudioReadResult(samplesRead)
+                        }
                     }
                 }
             } catch (e: IOException) {
@@ -545,9 +611,48 @@ class RootlessAudioProcessorService : BaseAudioProcessorService() {
 
                 recorder.release()
                 track.release()
+                trackObserver?.stop()
+                if(mediaSessionTrackObserver === trackObserver) {
+                    mediaSessionTrackObserver = null
+                }
+                analyzer?.stop()
+                if(tonalityAnalyzer === analyzer) {
+                    tonalityAnalyzer = null
+                }
             }
         }
         recorderThread!!.start()
+    }
+
+    private fun usableStereoSamples(samplesRead: Int): Int {
+        return when {
+            samplesRead <= 0 -> 0
+            samplesRead % 2 == 0 -> samplesRead
+            else -> {
+                Timber.w("AudioRecord returned odd sample count $samplesRead; dropping trailing sample")
+                samplesRead - 1
+            }
+        }
+    }
+
+    private fun handleAudioReadResult(code: Int) {
+        when (code) {
+            AudioRecord.ERROR_DEAD_OBJECT -> {
+                Timber.w("AudioRecord dead object; requesting recorder recreation")
+                recreateRecorderRequested = true
+            }
+            AudioRecord.ERROR_INVALID_OPERATION,
+            AudioRecord.ERROR_BAD_VALUE,
+            AudioRecord.ERROR -> {
+                Timber.w("AudioRecord read failed: $code")
+            }
+            0 -> {
+                // No data available. Ignore.
+            }
+            else -> {
+                Timber.w("Unknown AudioRecord read result: $code")
+            }
+        }
     }
 
     // Terminate recording thread

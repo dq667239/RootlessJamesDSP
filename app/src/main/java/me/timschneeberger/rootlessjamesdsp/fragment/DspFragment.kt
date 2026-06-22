@@ -14,6 +14,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import me.timschneeberger.rootlessjamesdsp.R
+import me.timschneeberger.rootlessjamesdsp.analysis.TonalityFrame
 import me.timschneeberger.rootlessjamesdsp.databinding.FragmentDspBinding
 import me.timschneeberger.rootlessjamesdsp.utils.Constants
 import me.timschneeberger.rootlessjamesdsp.utils.preferences.Preferences
@@ -28,6 +29,7 @@ class DspFragment : Fragment(), SharedPreferences.OnSharedPreferenceChangeListen
     private lateinit var binding: FragmentDspBinding
     private var updateNoticeOnClick: (() -> Unit)? = null
     private var updateNoticeOnCloseClick: (() -> Unit)? = null
+    private var latestTonalityFrame: TonalityFrame? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         prefsApp.registerOnSharedPreferenceChangeListener(this)
@@ -127,7 +129,7 @@ class DspFragment : Fragment(), SharedPreferences.OnSharedPreferenceChangeListen
             .commit()
 
         // Load initial preferences
-        arrayOf(R.string.key_device_profiles_enable).forEach {
+        arrayOf(R.string.key_device_profiles_enable, R.string.key_tonality_enabled).forEach {
             onSharedPreferenceChanged(null, getString(it))
         }
 
@@ -140,6 +142,32 @@ class DspFragment : Fragment(), SharedPreferences.OnSharedPreferenceChangeListen
                 (binding.cardDeviceProfiles.parent as ViewGroup).isVisible =
                     prefsApp.get<Boolean>(R.string.key_device_profiles_enable)
             }
+            getString(R.string.key_tonality_enabled) -> {
+                updateTonalityCard()
+            }
+        }
+    }
+
+    fun updateTonalityFrame(frame: TonalityFrame?) {
+        latestTonalityFrame = frame
+        if(this::binding.isInitialized) {
+            updateTonalityCard()
+        }
+    }
+
+    private fun updateTonalityCard() {
+        val enabled = prefsApp.get<Boolean>(R.string.key_tonality_enabled)
+        binding.songTonalityCard.root.isVisible = enabled
+
+        val frame = latestTonalityFrame
+        binding.songTonalityCard.songTonalityDescriptor.text = frame?.descriptor ?: getString(R.string.tonality_waiting)
+        binding.songTonalityCard.mnoiseDeviationSurface.submitFrame(frame)
+        binding.songTonalityCard.songTonalityStatus.text = when {
+            !enabled -> getString(R.string.tonality_disabled)
+            frame == null -> getString(R.string.tonality_waiting)
+            frame.validAudioMs < 1_000L -> getString(R.string.tonality_warming_up)
+            frame.confidence < 0.6f -> getString(R.string.tonality_tentative)
+            else -> getString(R.string.tonality_trace_legend)
         }
     }
 
