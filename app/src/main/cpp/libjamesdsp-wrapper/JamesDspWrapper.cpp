@@ -4,6 +4,9 @@
 #include <Log.h>
 
 #include <string>
+#include <cstring>
+#include <chrono>
+#include <thread>
 #include <jni.h>
 
 #include "JamesDspWrapper.h"
@@ -13,6 +16,11 @@
 extern "C" {
 #include "../EELStdOutExtension.h"
 #include <jdsp_header.h>
+
+extern char benchmarkEnable;
+extern char benchmarkCompletionFlag;
+extern double convbench_c0[MAX_BENCHMARK];
+extern double convbench_c1[MAX_BENCHMARK];
 }
 
 // C interop
@@ -125,7 +133,7 @@ Java_me_timschneeberger_rootlessjamesdsp_interop_JamesDspWrapper_alloc(JNIEnv *e
         return 1;
     }
 
-    JamesDSPGlobalMemoryAllocation();
+    JamesDSPGlobalMemoryAllocation(0);
     JamesDSPInit(_dsp, 128, 48000);
 
     if(!JamesDSPGetMutexStatus(_dsp))
@@ -178,8 +186,16 @@ Java_me_timschneeberger_rootlessjamesdsp_interop_JamesDspWrapper_runBenchmark(JN
     auto c0 = env->GetDoubleArrayElements(jc0, nullptr);
     auto c1 = env->GetDoubleArrayElements(jc1, nullptr);
 
-    JamesDSP_Start_benchmark();
-    JamesDSP_Save_benchmark(c0, c1);
+    JamesDSPGlobalMemoryDeallocation();
+    JamesDSPGlobalMemoryAllocation(1);
+
+    while(!benchmarkCompletionFlag)
+    {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+
+    std::memcpy(c0, convbench_c0, sizeof(convbench_c0));
+    std::memcpy(c1, convbench_c1, sizeof(convbench_c1));
 
     env->ReleaseDoubleArrayElements(jc0, c0, 0);
     env->ReleaseDoubleArrayElements(jc1, c1, 0);
@@ -193,7 +209,10 @@ Java_me_timschneeberger_rootlessjamesdsp_interop_JamesDspWrapper_loadBenchmark(J
     auto c0 = env->GetDoubleArrayElements(jc0, nullptr);
     auto c1 = env->GetDoubleArrayElements(jc1, nullptr);
 
-    JamesDSP_Load_benchmark(c0, c1);
+    std::memcpy(convbench_c0, c0, sizeof(convbench_c0));
+    std::memcpy(convbench_c1, c1, sizeof(convbench_c1));
+    benchmarkEnable = 1;
+    benchmarkCompletionFlag = 1;
 
     env->ReleaseDoubleArrayElements(jc0, c0, JNI_ABORT);
     env->ReleaseDoubleArrayElements(jc1, c1, JNI_ABORT);
@@ -424,7 +443,7 @@ Java_me_timschneeberger_rootlessjamesdsp_interop_JamesDspWrapper_setCompander(JN
 
     if(enable)
     {
-        CompressorSetParam(dsp, timeConstant, granularity, tfresolution, 0);
+        CompressorSetParam(dsp, timeConstant, granularity, tfresolution);
         auto* nativeBands = (env->GetDoubleArrayElements(bands, nullptr));
         CompressorSetGain(dsp, nativeBands, nativeBands + 7, 1);
         env->ReleaseDoubleArrayElements(bands, nativeBands, JNI_ABORT);
