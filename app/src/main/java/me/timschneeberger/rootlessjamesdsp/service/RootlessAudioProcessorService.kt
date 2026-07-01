@@ -35,6 +35,7 @@ import me.timschneeberger.rootlessjamesdsp.BuildConfig
 import me.timschneeberger.rootlessjamesdsp.R
 import me.timschneeberger.rootlessjamesdsp.analysis.PreDspTonalityAnalyzer
 import me.timschneeberger.rootlessjamesdsp.analysis.TonalityFrame
+import me.timschneeberger.rootlessjamesdsp.analysis.TonalityReferenceStore
 import me.timschneeberger.rootlessjamesdsp.flavor.CrashlyticsImpl
 import me.timschneeberger.rootlessjamesdsp.interop.JamesDspLocalEngine
 import me.timschneeberger.rootlessjamesdsp.interop.ProcessorMessageHandler
@@ -425,6 +426,11 @@ class RootlessAudioProcessorService : BaseAudioProcessorService() {
                     restartRecording()
                 }
             }
+            getString(R.string.key_tonality_reference_label) -> {
+                if(tonalityEnabled && isRunning && !isProcessorDisposing && !isServiceDisposing) {
+                    restartRecording()
+                }
+            }
         }
     }
 
@@ -487,7 +493,9 @@ class RootlessAudioProcessorService : BaseAudioProcessorService() {
         }
 
         val analyzer = if(tonalityEnabled) {
-            PreDspTonalityAnalyzer(onFrame = { frame ->
+            val reference = TonalityReferenceStore(this).loadBestFor(sampleRate)
+            Timber.i("Tonality reference active: ${reference.displayLabel}; sampleRate=${reference.sampleRate}")
+            PreDspTonalityAnalyzer(reference = reference, onFrame = { frame ->
                 _tonalityFrames.value = frame
             }).also {
                 it.start(sampleRate)

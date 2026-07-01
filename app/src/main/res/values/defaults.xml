@@ -37,6 +37,7 @@
     <bool name="default_audioformat_enhanced_processing" translatable="false">false</bool>
     <bool name="default_audioformat_optimization_benchmark" translatable="false">false</bool>
     <bool name="default_tonality_enabled" translatable="false">false</bool>
+    <string name="default_tonality_reference_label" translatable="false">approximate M-Noise-like curve</string>
 
     <!-- Device profiles -->
     <bool name="default_device_profiles_enable" translatable="false">false</bool>

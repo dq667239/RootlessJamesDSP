@@ -2,19 +2,26 @@ package me.timschneeberger.rootlessjamesdsp.analysis
 
 import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.TimeUnit
-import kotlin.math.PI
-import kotlin.math.cos
-import kotlin.math.ln
 import kotlin.math.log10
 import kotlin.math.max
 import kotlin.math.sqrt
 
 class PreDspTonalityAnalyzer(
+    private val reference: TonalityReference,
     private val onFrame: (TonalityFrame?) -> Unit,
     private val displayRateHz: Int = 5
 ) {
     private val queue = ArrayBlockingQueue<FloatArray>(QUEUE_CAPACITY)
-    private val frequencies = TonalBand.entries.map { it.centerHz }.toFloatArray()
+    private val frequencies = reference.frequencyHz.copyOf()
+    private val config = TonalityAnalysisConfig(
+        sampleRate = reference.sampleRate,
+        fftSize = reference.fftSize,
+        hopSize = reference.hopSize,
+        bandsPerOctave = reference.bandsPerOctave,
+        minHz = reference.minHz,
+        maxHz = reference.maxHz
+    )
+    private val bandAnalyzer = StereoFftBandAnalyzer(config, TonalityBandLayout.create(config))
     private val liveDeviationDb = FloatArray(frequencies.size)
     private val trackSumDeviationDb = FloatArray(frequencies.size)
     private var trackFrameCount = 0
@@ -36,6 +43,7 @@ class PreDspTonalityAnalyzer(
         trackFrameCount = 0
         liveDeviationDb.fill(0f)
         trackSumDeviationDb.fill(0f)
+        bandAnalyzer.reset()
         queue.clear()
         onFrame(null)
 
@@ -118,26 +126,29 @@ class PreDspTonalityAnalyzer(
             }
 
             validAudioMs += frameDurationMs
-            val songDb = estimateBandDb(samples, frameCount, sampleRate)
-            val deviation = normalizeToApproximateMNoise(songDb)
-            val now = System.nanoTime()
+            val powerFrames = bandAnalyzer.offerInterleavedStereo(samples, samples.size)
+            if (powerFrames.isEmpty()) continue
 
-            for (i in deviation.indices) {
-                liveDeviationDb[i] = if (validAudioMs <= LIVE_WARMUP_MS) {
-                    deviation[i]
-                }
-                else {
-                    (LIVE_EMA_ALPHA * deviation[i]) + ((1f - LIVE_EMA_ALPHA) * liveDeviationDb[i])
-                }
-            }
-
-            if (validAudioMs > TRACK_TRANSITION_MS) {
+            for (bandPower in powerFrames) {
+                val deviation = normalizeToReference(bandPower)
                 for (i in deviation.indices) {
-                    trackSumDeviationDb[i] += deviation[i]
+                    liveDeviationDb[i] = if (validAudioMs <= LIVE_WARMUP_MS || trackFrameCount == 0) {
+                        deviation[i]
+                    }
+                    else {
+                        (LIVE_EMA_ALPHA * deviation[i]) + ((1f - LIVE_EMA_ALPHA) * liveDeviationDb[i])
+                    }
                 }
-                ++trackFrameCount
+
+                if (validAudioMs > TRACK_TRANSITION_MS) {
+                    for (i in deviation.indices) {
+                        trackSumDeviationDb[i] += deviation[i]
+                    }
+                    ++trackFrameCount
+                }
             }
 
+            val now = System.nanoTime()
             if (now - lastFrameNs >= minFrameIntervalNs) {
                 lastFrameNs = now
                 onFrame(buildFrame(now))
@@ -171,68 +182,54 @@ class PreDspTonalityAnalyzer(
         return false
     }
 
-    private fun estimateBandDb(samples: FloatArray, frameCount: Int, sampleRate: Int): FloatArray {
-        return FloatArray(frequencies.size) { i ->
-            val freq = frequencies[i].coerceAtMost(sampleRate / 2f - 1f)
-            val power = goertzelStereoPower(samples, frameCount, sampleRate, freq)
-            10f * log10(power + POWER_FLOOR).toFloat()
+    private fun normalizeToReference(bandPower: FloatArray): FloatArray {
+        val rawDiff = FloatArray(bandPower.size) { i ->
+            StereoFftBandAnalyzer.powerToDb(bandPower[i]) - reference.referenceDb[i]
         }
-    }
-
-    private fun goertzelStereoPower(samples: FloatArray, frameCount: Int, sampleRate: Int, freqHz: Float): Double {
-        val omega = 2.0 * PI * freqHz / sampleRate
-        val coeff = 2.0 * cos(omega)
-        var leftQ0: Double
-        var leftQ1 = 0.0
-        var leftQ2 = 0.0
-        var rightQ0: Double
-        var rightQ1 = 0.0
-        var rightQ2 = 0.0
-        var i = 0
-
-        while (i < frameCount) {
-            val sampleIndex = i * CHANNELS
-            leftQ0 = coeff * leftQ1 - leftQ2 + samples[sampleIndex]
-            leftQ2 = leftQ1
-            leftQ1 = leftQ0
-
-            rightQ0 = coeff * rightQ1 - rightQ2 + samples[sampleIndex + 1]
-            rightQ2 = rightQ1
-            rightQ1 = rightQ0
-            ++i
-        }
-
-        val leftPower = leftQ1 * leftQ1 + leftQ2 * leftQ2 - coeff * leftQ1 * leftQ2
-        val rightPower = rightQ1 * rightQ1 + rightQ2 * rightQ2 - coeff * rightQ1 * rightQ2
-        return 0.5 * (leftPower + rightPower) / max(1, frameCount)
-    }
-
-    private fun normalizeToApproximateMNoise(songDb: FloatArray): FloatArray {
-        val rawDiff = FloatArray(songDb.size) { i ->
-            songDb[i] - approximateMNoiseReferenceDb(frequencies[i])
-        }
-        val anchor = median(rawDiff)
+        val anchor = medianUsable(rawDiff)
         return FloatArray(rawDiff.size) { i -> rawDiff[i] - anchor }
     }
 
-    private fun approximateMNoiseReferenceDb(freqHz: Float): Float {
-        val octaveFrom1Khz = ln(freqHz / 1_000f) / ln(2f)
-        return (-3f * octaveFrom1Khz).coerceIn(-14f, 14f)
+    private fun medianUsable(values: FloatArray): Float {
+        val usable = ArrayList<Float>(values.size)
+        val upper = minOf(12_000f, reference.maxHz)
+        for (i in values.indices) {
+            if (frequencies[i] in 40f..upper && values[i].isFinite()) {
+                usable += values[i]
+            }
+        }
+        if (usable.isEmpty()) {
+            for (value in values) {
+                if (value.isFinite()) usable += value
+            }
+        }
+        usable.sort()
+        val middle = usable.size / 2
+        return if (usable.size % 2 == 0) {
+            (usable[middle - 1] + usable[middle]) / 2f
+        }
+        else {
+            usable[middle]
+        }
     }
 
     private fun buildFrame(now: Long): TonalityFrame {
         val trackDeviationDb = FloatArray(frequencies.size) { i ->
             if (trackFrameCount > 0) trackSumDeviationDb[i] / trackFrameCount else liveDeviationDb[i]
         }
-        val tonalBands = TonalBand.entries.withIndex().associate { (i, band) ->
-            band to trackDeviationDb[i]
+        val tonalBands = TonalBand.entries.associateWith { band ->
+            averageAroundBand(trackDeviationDb, band.centerHz)
         }
-        val score = rms(trackDeviationDb)
+        val score = StereoFftBandAnalyzer.rms(trackDeviationDb)
 
         return TonalityFrame(
             timestampNs = now,
             track = currentTrack,
             validAudioMs = validAudioMs,
+            referenceName = reference.referenceName,
+            referenceKind = reference.referenceKind,
+            referenceIsVerified = reference.isVerified,
+            referenceLabel = reference.displayLabel,
             frequencyHz = frequencies.copyOf(),
             liveDeviationDb = liveDeviationDb.copyOf(),
             trackDeviationDb = trackDeviationDb,
@@ -244,26 +241,53 @@ class PreDspTonalityAnalyzer(
         )
     }
 
+    private fun averageAroundBand(deviationDb: FloatArray, centerHz: Float): Float {
+        val lower = centerHz / sqrt(2f)
+        val upper = centerHz * sqrt(2f)
+        var sum = 0f
+        var count = 0
+        for (i in frequencies.indices) {
+            if (frequencies[i] in lower..upper) {
+                sum += deviationDb[i]
+                ++count
+            }
+        }
+        if (count > 0) return sum / count
+
+        var bestIndex = 0
+        var bestDistance = Float.MAX_VALUE
+        for (i in frequencies.indices) {
+            val distance = kotlin.math.abs(frequencies[i] - centerHz)
+            if (distance < bestDistance) {
+                bestDistance = distance
+                bestIndex = i
+            }
+        }
+        return deviationDb[bestIndex]
+    }
+
     private fun describe(bands: Map<TonalBand, Float>, deviationScoreDb: Float): String {
         if (validAudioMs < LIVE_WARMUP_MS) {
             return "Warming up... ${validAudioMs / 1000f}s valid audio"
         }
 
+        val label = reference.displayLabel
         if (deviationScoreDb < NEUTRAL_SCORE_DB) {
-            return "Near-neutral vs approximate M-Noise. Deviation score: %.1f dB.".format(deviationScoreDb)
+            return "Near reference spectral balance vs $label. Deviation score: %.1f dB.".format(deviationScoreDb)
         }
 
         val strongestBoost = bands.maxBy { it.value }
         val strongestCut = bands.minBy { it.value }
         val tone = classifyTone(strongestBoost.key, strongestCut.key)
 
-        return "%s: %+.1f dB %s, %+.1f dB %s vs approximate M-Noise. Deviation score: %.1f dB."
+        return "%s: %+.1f dB %s, %+.1f dB %s vs %s. Deviation score: %.1f dB."
             .format(
                 tone,
                 strongestBoost.value,
                 strongestBoost.key.label,
                 strongestCut.value,
                 strongestCut.key.label,
+                label,
                 deviationScoreDb
             )
     }
@@ -281,17 +305,6 @@ class PreDspTonalityAnalyzer(
 
     private fun confidenceFor(validAudioMs: Long): Float {
         return (validAudioMs / 5_000f).coerceIn(0.1f, 1f)
-    }
-
-    private fun median(values: FloatArray): Float {
-        val sorted = values.copyOf().apply { sort() }
-        val middle = sorted.size / 2
-        return if (sorted.size % 2 == 0) {
-            (sorted[middle - 1] + sorted[middle]) / 2f
-        }
-        else {
-            sorted[middle]
-        }
     }
 
     private fun rms(values: FloatArray): Float {

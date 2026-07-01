@@ -616,12 +616,20 @@
     <string name="tonality_enabled">Enable song tonality analyzer</string>
     <string name="tonality_enabled_off">Analyze captured playback before JamesDSP processing. Disabled by default.</string>
     <string name="tonality_enabled_on">Analyzing captured playback before JamesDSP processing.</string>
+    <string name="tonality_import_reference">Import M-Noise/reference WAV</string>
+    <string name="tonality_import_reference_summary">Build a private reference table from a local WAV. The WAV is not bundled or copied.</string>
+    <string name="tonality_reference_status">Reference status</string>
+    <string name="tonality_reference_format">Reference: %1$s</string>
+    <string name="tonality_import_running">Building reference tables...</string>
+    <string name="tonality_import_verified">Verified M-Noise WAV reference imported.</string>
+    <string name="tonality_import_unverified">Imported reference WAV. It does not match the known M-Noise checksum.</string>
+    <string name="tonality_import_error">Reference import failed: %1$s</string>
     <string name="tonality_title">Song Tonality</string>
     <string name="tonality_waiting">Waiting for playback...</string>
     <string name="tonality_disabled">Song tonality analyzer disabled</string>
     <string name="tonality_warming_up">Warming up...</string>
     <string name="tonality_tentative">Tentative reading. Live trace and track average shown.</string>
-    <string name="tonality_trace_legend">Live trace and track average vs approximate M-Noise</string>
+    <string name="tonality_trace_legend">Live trace and track average vs reference</string>
 
     <!-- App list -->
     <string name="app_list_loading">Loading apps…</string>

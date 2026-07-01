@@ -165,9 +165,15 @@ class DspFragment : Fragment(), SharedPreferences.OnSharedPreferenceChangeListen
         binding.songTonalityCard.songTonalityStatus.text = when {
             !enabled -> getString(R.string.tonality_disabled)
             frame == null -> getString(R.string.tonality_waiting)
-            frame.validAudioMs < 1_000L -> getString(R.string.tonality_warming_up)
-            frame.confidence < 0.6f -> getString(R.string.tonality_tentative)
-            else -> getString(R.string.tonality_trace_legend)
+            frame.validAudioMs < 1_000L -> "%s %s".format(
+                getString(R.string.tonality_warming_up),
+                getString(R.string.tonality_reference_format, frame.referenceLabel)
+            )
+            frame.confidence < 0.6f -> "%s %s".format(
+                getString(R.string.tonality_tentative),
+                getString(R.string.tonality_reference_format, frame.referenceLabel)
+            )
+            else -> getString(R.string.tonality_reference_format, frame.referenceLabel)
         }
     }
 

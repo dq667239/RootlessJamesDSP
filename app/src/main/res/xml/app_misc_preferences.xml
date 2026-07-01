@@ -37,6 +37,16 @@
             android:summaryOff="@string/tonality_enabled_off"
             android:summaryOn="@string/tonality_enabled_on"
             app:iconSpaceReserved="false" />
+        <Preference
+            android:key="@string/key_tonality_import_reference"
+            android:title="@string/tonality_import_reference"
+            android:summary="@string/tonality_import_reference_summary"
+            app:iconSpaceReserved="false" />
+        <Preference
+            android:key="@string/key_tonality_reference_status"
+            android:title="@string/tonality_reference_status"
+            android:selectable="false"
+            app:iconSpaceReserved="false" />
     </PreferenceCategory>
 
     <PreferenceCategory app:title="@string/misc_permission_header"

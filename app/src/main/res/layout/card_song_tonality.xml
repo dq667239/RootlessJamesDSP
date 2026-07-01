@@ -26,7 +26,7 @@
             android:layout_marginTop="8dp"
             android:text="@string/tonality_waiting"
             android:textAppearance="?attr/textAppearanceBody1"
-            tools:text="Bass-heavy: +4.2 dB bass, -2.8 dB air vs approximate M-Noise." />
+            tools:text="Bass-heavy: +4.2 dB bass, -2.8 dB air vs verified M-Noise WAV." />
 
         <me.timschneeberger.rootlessjamesdsp.view.MNoiseDeviationSurface
             android:id="@+id/mnoise_deviation_surface"
