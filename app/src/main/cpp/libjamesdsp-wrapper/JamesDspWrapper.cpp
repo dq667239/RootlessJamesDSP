@@ -133,7 +133,7 @@ Java_me_timschneeberger_rootlessjamesdsp_interop_JamesDspWrapper_alloc(JNIEnv *e
         return 1;
     }
 
-    JamesDSPGlobalMemoryAllocation(0);
+    JamesDSPGlobalMemoryAllocation();
     JamesDSPInit(_dsp, 128, 48000);
 
     if(!JamesDSPGetMutexStatus(_dsp))
@@ -187,7 +187,7 @@ Java_me_timschneeberger_rootlessjamesdsp_interop_JamesDspWrapper_runBenchmark(JN
     auto c1 = env->GetDoubleArrayElements(jc1, nullptr);
 
     JamesDSPGlobalMemoryDeallocation();
-    JamesDSPGlobalMemoryAllocation(1);
+    JamesDSPGlobalMemoryAllocation();
 
     while(!benchmarkCompletionFlag)
     {
