@@ -77,15 +77,20 @@ jobs:
           set -x
           echo "VERSION_TAG=${GITHUB_REF/refs\/tags\//}" >> $GITHUB_ENV
        
+      - name: Generate temporary keystore
+        run: |
+          keytool -genkeypair -v -keystore temp.jks -keyalg RSA -keysize 2048 -validity 10000 -alias mykey -dname "CN=Personal Use" -storepass password123 -keypass password123
+          echo "TEMP_KEYSTORE=$(base64 -w 0 temp.jks)" >> $GITHUB_ENV
+
       - name: Sign APKs
         uses: ilharp/sign-android-release@v1.0.4
         with:
           buildToolsVersion: 35.0.0
           releaseDir: app/build/outputs/apk/${{ steps.flavor.outputs.lowercase }}Full/${{ env.BUILD_TYPE }}
-          signingKey: ${{ secrets.SIGNING_KEYSTORE }}
-          keyAlias: ${{ secrets.KEY_ALIAS }}
-          keyStorePassword: ${{ secrets.KEYSTORE_PASSWORD }}
-          keyPassword: ${{ secrets.KEY_PASSWORD }}
+          signingKey: ${{ env.TEMP_KEYSTORE }}
+          keyAlias: mykey
+          keyStorePassword: password123
+          keyPassword: password123
 
       - name: Rename build artifacts
         run: |
