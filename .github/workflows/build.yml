@@ -35,8 +35,11 @@ jobs:
     
       - name: Clone repo
         uses: actions/checkout@v4
-        with:
-          submodules: true
+
+      - name: Fix broken submodule
+        run: |
+          rm -rf app/src/main/cpp/libjamesdsp
+          git clone https://github.com/ThePBone/JamesDSPManager app/src/main/cpp/libjamesdsp
 
       - name: Validate Gradle Wrapper
         uses: gradle/wrapper-validation-action@v3
